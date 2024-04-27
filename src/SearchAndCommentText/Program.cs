@@ -1,4 +1,5 @@
-﻿using DocumentFormat.OpenXml;
+﻿using System.Text.RegularExpressions;
+using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 
@@ -17,25 +18,88 @@ class Program
         Body? body = wordprocessingDocument.MainDocumentPart?.Document.Body;
         foreach (var para in body?.Descendants<Paragraph>()!)
         {
-            foreach (var run in para?.Descendants<Run>()!)
+            var paraInnerText = para.InnerText;
+            var matches = Regex.Matches(paraInnerText, searchTerm);
+            foreach (Match match in matches)
             {
-                var text = run.GetFirstChild<Text>();
-                if (text != null)
-                {
-                    int index = text.Text.IndexOf(searchTerm, StringComparison.InvariantCultureIgnoreCase);
-                    if (index >= 0)
-                    {
-                        var searchTermRun = SplitRun(run, index, searchTerm.Length);
-                        Comments? comments;
-                        comments = GetCommentsPart(wordprocessingDocument);
-                        int id = GetNextId(comments);
+                var startIndex = match.Index;
+                var endIndex = startIndex + match.Length;
+                var runs = para.Descendants<Run>()!.ToArray();
 
-                        string comment = $"Found {searchTerm}";
-                        InsertComment(comment, id, "OpenXml.Examples", "OE", comments, para, searchTermRun);
-                    }
+                int i = 0;
+                for (; i < runs.Length; i++)
+                {
+                    int runLength = runs[i].InnerText.Length;
+                    if (startIndex < runLength)
+                        break;
+                    startIndex -= runLength;
+                    endIndex -= runLength;
                 }
+
+                var searchTermRun = new Run(new Text(searchTerm) { Space = SpaceProcessingModeValues.Preserve });
+
+                var currentRun = runs[i];
+                currentRun.InsertBeforeSelf(searchTermRun);
+                
+                if (startIndex > 0)
+                {
+                    var beforeText = currentRun.InnerText.Substring(0, startIndex);
+                    var beforeTextRun = new Run(new Text(beforeText)
+                        { Space = SpaceProcessingModeValues.Preserve });
+                    searchTermRun.InsertBeforeSelf(beforeTextRun);
+                }
+
+                if (startIndex + searchTerm.Length < currentRun.InnerText.Length)
+                {
+                    var afterText = currentRun.InnerText.Substring(startIndex + searchTerm.Length,
+                        currentRun.InnerText.Length - (startIndex + searchTerm.Length));
+                    var afterTextRun = new Run(new Text(afterText) { Space = SpaceProcessingModeValues.Preserve });
+                    searchTermRun.InsertAfterSelf(afterTextRun);
+                    currentRun.Remove();
+                }
+                else
+                {
+                    while (endIndex > currentRun.InnerText.Length)
+                    {
+                        endIndex -= currentRun.InnerText.Length;
+                        currentRun.Remove();
+                        currentRun = runs[++i];
+                    }
+                    var afterText = currentRun.InnerText.Substring(endIndex,
+                        currentRun.InnerText.Length - endIndex);
+                    var afterTextRun = new Run(new Text(afterText) { Space = SpaceProcessingModeValues.Preserve });
+                    searchTermRun.InsertAfterSelf(afterTextRun);
+                    currentRun.Remove();
+                }
+                
+                Comments? comments;
+                comments = GetCommentsPart(wordprocessingDocument);
+                int id = GetNextId(comments);
+
+                string comment = $"Found {searchTerm}";
+                InsertComment(comment, id, "OpenXml.Examples", "OE", comments, para, searchTermRun);
             }
+
+            // foreach (var run in para?.Descendants<Run>()!)
+            // {
+            //     var text = run.GetFirstChild<Text>();
+            //     if (text != null)
+            //     {
+            //         int index = text.Text.IndexOf(searchTerm, StringComparison.InvariantCultureIgnoreCase);
+            //         if (index >= 0)
+            //         {
+            //             var searchTermRun = SplitRun(run, index, searchTerm.Length);
+            //             Comments? comments;
+            //             comments = GetCommentsPart(wordprocessingDocument);
+            //             int id = GetNextId(comments);
+            //
+            //             string comment = $"Found {searchTerm}";
+            //             InsertComment(comment, id, "OpenXml.Examples", "OE", comments, para, searchTermRun);
+            //         }
+            //     }
+            // }
         }
+
         wordprocessingDocument.Save();
     }
 
@@ -75,7 +139,8 @@ class Program
     private static Comments? GetCommentsPart(WordprocessingDocument wordprocessingDocument)
     {
         Comments? comments = null;
-        if (wordprocessingDocument.MainDocumentPart != null && wordprocessingDocument.MainDocumentPart.GetPartsOfType<WordprocessingCommentsPart>().Any())
+        if (wordprocessingDocument.MainDocumentPart != null && wordprocessingDocument.MainDocumentPart
+                .GetPartsOfType<WordprocessingCommentsPart>().Any())
         {
             comments =
                 wordprocessingDocument.MainDocumentPart.WordprocessingCommentsPart?.Comments;
